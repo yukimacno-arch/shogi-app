@@ -49,6 +49,16 @@
             updateAuthUI(user);
         });
 
+        function undoMove() {
+            console.log('待った実行: 現在の履歴数 = ', gameHistory.length);
+            if (gameHistory.length === 0) return;
+            const prev = gameHistory.pop();
+            applyGameState(prev);
+            sendGameState();
+        }
+        // グローバルに公開
+        window.undoMove = undoMove;
+
         // expose for use elsewhere
         window.firebaseAuth = auth;
         window.firebaseSignIn = () => {
@@ -491,6 +501,7 @@
     <div id="auth-ui" style="margin-bottom:10px; text-align:center; color:#d4a574;">
         <button id="google-login-btn" style="padding:5px 10px;">Googleでログイン</button>
         <span id="profile-container" style="margin-left:20px;"></span>
+        <button id="undo-btn" style="padding:5px 10px; margin-left:20px;">待った (Undo)</button>
     </div>
     <!-- ネットワーク対戦UI -->
     <div id="network-ui" style="margin-bottom:20px; text-align:center; color:#d4a574;">
@@ -647,6 +658,18 @@
 
         // 持ち駒集計
         let capturedCounts = { sente: {}, gote: {} };
+        // 履歴スタック（待った用）
+        let gameHistory = [];
+
+        function pushHistory() {
+            // 深いコピーで現在状態を保存
+            const state = {
+                board: serializeBoard(),
+                capturedCounts: JSON.parse(JSON.stringify(capturedCounts)),
+                isWhiteTurn: isWhiteTurn
+            };
+            gameHistory.push(state);
+        }
 
         // ネットワーク対戦関連
         let peer = null;
@@ -1210,6 +1233,10 @@
             if (!selectedPiece) return;
             if (gameOver) return;
 
+            // 保存を先行
+            pushHistory();
+            console.log('履歴保存: ', gameHistory.length);
+
             const piece = selectedPiece.piece;
             const fromSquare = selectedPiece.square;
             const piecePlayer = getPiecePlayer(piece);
@@ -1353,6 +1380,9 @@
             if (!selectedCapturedPiece) return;
             if (targetSquare.querySelector('.piece')) return;
 
+            // 履歴保存
+            pushHistory();
+
             const charLabel = selectedCapturedPiece.charLabel;
             const player = selectedCapturedPiece.player;
 
@@ -1436,6 +1466,10 @@
             if (loginBtn) loginBtn.addEventListener('click', () => {
                 window.firebaseSignIn();
             });
+            const undoBtn = document.getElementById('undo-btn');
+            if (undoBtn) undoBtn.addEventListener('click', () => {
+                if (window.undoMove) window.undoMove();
+            });
 
             document.getElementById('connect-button').addEventListener('click', () => {
                 const target = document.getElementById('peer-id-input').value.trim();
@@ -1480,4 +1514,3 @@
     </script>
 </body>
 </html>
-
