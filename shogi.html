@@ -1,0 +1,1420 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>将棋</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            padding: 20px;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 30px;
+        }
+
+        h1 {
+            color: #d4a574;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+            font-size: 3em;
+            letter-spacing: 3px;
+            font-weight: 300;
+            text-decoration: underline;
+            text-decoration-color: #8b6f47;
+            text-underline-offset: 8px;
+        }
+
+        .game-area {
+            display: flex;
+            gap: 30px;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        /* ゲスト視点時、盤面のみ回転 */
+        body.guest-view #shogi-board {
+            transform: rotate(180deg);
+        }
+        /* 駒の向き: data-player 属性ベースで制御 */
+        /* 通常（先手視点） */
+        body:not(.guest-view) .piece[data-player="gote"] { transform: rotate(180deg); }
+        body:not(.guest-view) .piece[data-player="sente"] { transform: rotate(0deg); }
+        body:not(.guest-view) .piece.selected[data-player="gote"] { transform: translateY(-8px) rotate(180deg); }
+        body:not(.guest-view) .piece.selected[data-player="sente"] { transform: translateY(-8px) rotate(0deg); }
+        /* 後手（ゲスト）視点 */
+        /* ボード本体が180°回転しているため、自駒（gote）はさらに180°回して正向きに、
+           先手駒（sente）はそのまま回転して対戦相手として下向きになる。*/
+        body.guest-view .piece[data-player="gote"] { transform: rotate(180deg); }
+        body.guest-view .piece[data-player="sente"] { transform: rotate(0deg); }
+        body.guest-view .piece.selected[data-player="gote"] { transform: translateY(-8px) rotate(180deg); }
+        body.guest-view .piece.selected[data-player="sente"] { transform: translateY(-8px) rotate(0deg); }
+
+        .board-container {
+            perspective: 1000px;
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.9);
+        }
+
+        .game-board {
+            width: 600px;
+            height: 600px;
+            background: 
+                linear-gradient(90deg, 
+                    rgba(139, 111, 71, 0.3) 0%, 
+                    transparent 10%, 
+                    transparent 90%, 
+                    rgba(139, 111, 71, 0.3) 100%
+                ),
+                linear-gradient(0deg, 
+                    rgba(139, 111, 71, 0.3) 0%, 
+                    transparent 10%, 
+                    transparent 90%, 
+                    rgba(139, 111, 71, 0.3) 100%
+                ),
+                linear-gradient(135deg, #a0826d 0%, #8b7355 25%, #9d7e5d 50%, #8b7355 75%, #a0826d 100%);
+            background-size: 100% 100%, 100% 100%, 400% 400%;
+            border: 12px solid #4a3728;
+            border-radius: 3px;
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            grid-template-rows: repeat(9, 1fr);
+            gap: 0;
+            position: relative;
+            box-shadow: 
+                inset 0 0 30px rgba(0, 0, 0, 0.6),
+                inset 0 2px 5px rgba(255, 255, 255, 0.1),
+                0 20px 40px rgba(0, 0, 0, 0.8);
+        }
+
+        .game-board::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: 
+                repeating-linear-gradient(
+                    0deg,
+                    transparent,
+                    transparent 65px,
+                    rgba(0, 0, 0, 0.1) 65px,
+                    rgba(0, 0, 0, 0.1) 66px
+                ),
+                repeating-linear-gradient(
+                    90deg,
+                    transparent,
+                    transparent 65px,
+                    rgba(0, 0, 0, 0.1) 65px,
+                    rgba(0, 0, 0, 0.1) 66px
+                ),
+                repeating-linear-gradient(
+                    45deg,
+                    transparent,
+                    transparent 1px,
+                    rgba(0, 0, 0, 0.03) 1px,
+                    rgba(0, 0, 0, 0.03) 2px
+                ),
+                repeating-linear-gradient(
+                    90deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(0, 0, 0, 0.05) 2px,
+                    rgba(0, 0, 0, 0.05) 4px
+                );
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .square {
+            background: linear-gradient(135deg, #d4a574 0%, #c89968 40%, #b8944a 100%);
+            border: 1px solid #8b6f47;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 
+                inset 0 1px 3px rgba(255, 255, 255, 0.2),
+                inset 0 -1px 2px rgba(0, 0, 0, 0.3);
+        }
+
+        .square:nth-child(9n+1),
+        .square:nth-child(n+73) {
+            background: linear-gradient(135deg, #ddb77f 0%, #d4a574 40%, #c79560 100%);
+        }
+
+        .square:nth-child(9n+9) {
+            background: linear-gradient(135deg, #ddb77f 0%, #d4a574 40%, #c79560 100%);
+        }
+
+        .piece {
+            width: 85%;
+            height: 85%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            font-size: 32px;
+            font-weight: bold;
+            color: #1a1a1a;
+            background: radial-gradient(circle at 30% 30%, #fef5d9, #f5deb3 30%, #e6c200 70%, #d4a820 100%);
+            border-radius: 50%;
+            border: 3px solid #8b7217;
+            box-shadow: 
+                0 6px 12px rgba(0, 0, 0, 0.4),
+                inset -3px -3px 6px rgba(0, 0, 0, 0.3),
+                inset 3px 3px 8px rgba(255, 255, 255, 0.4),
+                inset -1px -1px 3px rgba(0, 0, 0, 0.2);
+            text-shadow: 
+                -1px -1px 1px rgba(255, 255, 255, 0.3),
+                1px 1px 1px rgba(0, 0, 0, 0.2);
+            letter-spacing: 0;
+            line-height: 1;
+            font-family: Arial, sans-serif;
+            transition: all 0.2s ease;
+            cursor: grab;
+        }
+
+        .piece::after {
+            content: attr(data-char);
+        }
+
+                .piece.promoted {
+            color: red;
+            font-size: 28px;
+            font-weight: 900;
+            text-shadow: 
+                -1px -1px 1px rgba(255, 255, 255, 0.3),
+                1px 1px 1px rgba(0, 0, 0, 0.4),
+                0 0 3px rgba(255, 0, 0, 0.3);
+        }
+        .piece.promoted {
+            color: red;
+            font-size: 28px;
+            font-weight: 900;
+            text-shadow: 
+                -1px -1px 1px rgba(255, 255, 255, 0.3),
+                1px 1px 1px rgba(0, 0, 0, 0.4),
+                0 0 3px rgba(255, 0, 0, 0.3);
+        }
+
+        .piece.selected {
+            transform: translateY(-8px);
+            box-shadow: 
+                0 10px 20px rgba(255, 215, 0, 0.6),
+                inset -3px -3px 6px rgba(0, 0, 0, 0.3),
+                inset 3px 3px 8px rgba(255, 255, 255, 0.4),
+                inset -1px -1px 3px rgba(0, 0, 0, 0.2) !important;
+            border-color: #ffd700 !important;
+            cursor: grabbing;
+        }
+
+        
+        .square.valid-move {
+            box-shadow: inset 0 0 15px rgba(0, 255, 0, 0.4) !important;
+        }
+
+        .square.valid-move::after {
+            content: '';
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: radial-gradient(circle, rgba(0, 255, 0, 0.5), rgba(0, 255, 0, 0.1));
+            border: 2px solid rgba(0, 255, 0, 0.7);
+            border-radius: 50%;
+            z-index: 10;
+        }
+
+        .captured-area {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            width: 120px;
+        }
+
+        .captured-section {
+            background: rgba(139, 111, 71, 0.2);
+            border: 2px solid #8b6f47;
+            border-radius: 5px;
+            padding: 12px;
+            min-height: 200px;
+        }
+
+        .captured-label {
+            font-size: 14px;
+            color: #d4a574;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #8b6f47;
+            padding-bottom: 8px;
+        }
+
+        .captured-pieces {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            justify-content: center;
+        }
+
+        .captured-piece {
+            width: 45px;
+            height: 45px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: bold;
+            color: #1a1a1a;
+            background: radial-gradient(circle at 30% 30%, #fef5d9, #f5deb3 30%, #e6c200 70%, #d4a820 100%);
+            border-radius: 50%;
+            border: 2px solid #8b7217;
+            box-shadow: 
+                0 4px 8px rgba(0, 0, 0, 0.3),
+                inset -2px -2px 4px rgba(0, 0, 0, 0.2),
+                inset 2px 2px 4px rgba(255, 255, 255, 0.3);
+            text-shadow: 
+                -1px -1px 1px rgba(255, 255, 255, 0.3),
+                1px 1px 1px rgba(0, 0, 0, 0.2);
+            cursor: grab;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+        .captured-piece .badge {
+            position: absolute;
+            right: -2px;
+            top: -2px;
+            background: red;
+            color: white;
+            border-radius: 50%;
+            padding: 2px 5px;
+            font-size: 12px;
+            font-weight: bold;
+            line-height: 1;
+        }
+
+        .captured-piece::after {
+            content: attr(data-char);
+        }
+
+        .captured-piece:hover {
+            transform: scale(1.1);
+            box-shadow: 
+                0 6px 12px rgba(0, 0, 0, 0.4),
+                inset -2px -2px 4px rgba(0, 0, 0, 0.2),
+                inset 2px 2px 4px rgba(255, 255, 255, 0.3),
+                0 0 12px rgba(255, 215, 0, 0.3);
+        }
+
+        .captured-piece.selected {
+            transform: scale(1.2);
+            box-shadow: 
+                0 8px 16px rgba(255, 215, 0, 0.6),
+                inset -2px -2px 4px rgba(0, 0, 0, 0.2),
+                inset 2px 2px 4px rgba(255, 255, 255, 0.3);
+            border-color: #ffd700;
+        }
+
+        #turn-info {
+            font-size: 18px;
+            font-weight: bold;
+            color: #ffd700;
+            padding: 12px 20px;
+            background: rgba(139, 111, 71, 0.3);
+            border: 2px solid #8b6f47;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            min-width: 300px;
+        }
+
+        #turn-info.white-turn {
+            color: #87ceeb;
+        }
+
+        .info-text {
+            color: #d4a574;
+            font-size: 14px;
+            text-align: center;
+            max-width: 600px;
+            line-height: 1.6;
+        }
+
+        #game-over-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #game-over-overlay.show {
+            display: flex;
+        }
+
+        .game-over-message {
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            border: 4px solid #d4a574;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.9);
+            max-width: 600px;
+        }
+
+        .game-over-message h2 {
+            font-size: 3.5em;
+            color: #ffd700;
+            text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.8);
+            margin-bottom: 20px;
+            letter-spacing: 2px;
+        }
+
+        .game-over-message p {
+            font-size: 1.2em;
+            color: #d4a574;
+            margin-bottom: 30px;
+        }
+
+        .reset-button {
+            background: linear-gradient(135deg, #d4a574 0%, #c89968 100%);
+            color: #1a1a1a;
+            border: none;
+            padding: 15px 40px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+            transition: all 0.3s ease;
+        }
+
+        .reset-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 9px 18px rgba(0, 0, 0, 0.6);
+        }
+
+        .reset-button:active {
+            transform: translateY(-1px);
+        }
+
+        @media (max-width: 600px) {
+            .game-board {
+                width: 100%;
+                max-width: 600px;
+                height: 100vw;
+                max-height: 600px;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+
+            .piece {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- ネットワーク対戦UI -->
+    <div id="network-ui" style="margin-bottom:20px; text-align:center; color:#d4a574;">
+        <div>あなたのID: <span id="my-id">...</span></div>
+        <input type="text" id="peer-id-input" placeholder="相手のIDを入力" style="padding:5px; margin:5px;">
+        <button id="connect-button" style="padding:5px 10px;">接続する</button>
+        <div id="connection-status" style="margin-top:5px; font-weight:bold;">接続待ち...</div>
+    </div>
+    <div class="container">
+        <h1>将棋</h1>
+        
+        <div class="game-area">
+            <div class="captured-area">
+                <div class="captured-section">
+                    <div class="captured-label">先手の<br>持ち駒</div>
+                    <div class="captured-pieces" id="sente-captured"></div>
+                </div>
+            </div>
+            
+            <div>
+                <div id="shogi-board" class="board-container">
+                    <div class="game-board">
+                        <!-- 9段目: 後手の駒 -->
+                        <div class="square"><div class="piece white" data-player="gote" data-char="香"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="桂"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="銀"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="金"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="玉"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="金"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="銀"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="桂"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="香"></div></div>
+
+                        <!-- 8段目: 後手の飛車と角行 -->
+                        <div class="square"></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="飛"></div></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="角"></div></div>
+                        <div class="square"></div>
+
+                        <!-- 7段目: 後手の歩 -->
+                        <div class="square"><div class="piece white" data-player="gote" data-char="歩"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="歩"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="歩"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="歩"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="歩"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="歩"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="歩"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="歩"></div></div>
+                        <div class="square"><div class="piece white" data-player="gote" data-char="歩"></div></div>
+
+                        <!-- 6段目: 空 -->
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+
+                        <!-- 5段目: 空 -->
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+
+                        <!-- 4段目: 空 -->
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+
+                        <!-- 3段目: 先手の歩 -->
+                        <div class="square"><div class="piece black" data-player="sente" data-char="歩"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="歩"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="歩"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="歩"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="歩"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="歩"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="歩"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="歩"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="歩"></div></div>
+
+                        <!-- 2段目: 先手の飛車と角行 -->
+                        <div class="square"></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="角"></div></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="飛"></div></div>
+                        <div class="square"></div>
+
+                        <!-- 1段目: 先手の駒 -->
+                        <div class="square"><div class="piece black" data-player="sente" data-char="香"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="桂"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="銀"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="金"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="玉"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="金"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="銀"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="桂"></div></div>
+                        <div class="square"><div class="piece black" data-player="sente" data-char="香"></div></div>
+                    </div>
+                </div>
+
+                <div id="turn-info">先手（黒）の番です</div>
+                <div class="info-text">
+                    <p>将棋盤 - 駒をクリックして空きマスに移動できます</p>
+                </div>
+            </div>
+
+            <div class="captured-area">
+                <div class="captured-section">
+                    <div class="captured-label">後手の<br>持ち駒</div>
+                    <div class="captured-pieces" id="gote-captured"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="game-over-overlay">
+        <div class="game-over-message">
+            <h2 id="game-over-title"></h2>
+            <p id="game-over-text"></p>
+            <button class="reset-button" onclick="resetGame()">もう一度対局する</button>
+        </div>
+    </div>
+
+    <script>
+        // ゲーム状態
+        let selectedPiece = null;
+        let validMoves = [];
+        let selectedCapturedPiece = null;
+        let isWhiteTurn = false; // false = 黒（先手）、true = 白（後手）
+        let gameOver = false; // ゲーム終了フラグ
+
+        // 持ち駒集計
+        let capturedCounts = { sente: {}, gote: {} };
+
+        // ネットワーク対戦関連
+        let peer = null;
+        let conn = null;
+        let isGuest = false; // 接続要求した側
+
+        function setStatus(msg) {
+            const status = document.getElementById('connection-status');
+            if (status) status.textContent = msg;
+        }
+
+        function renderCapturedArea(player) {
+            const containerId = player === 'sente' ? 'sente-captured' : 'gote-captured';
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+            const counts = capturedCounts[player] || {};
+            Object.keys(counts).forEach(char => {
+                const count = counts[char];
+                if (count <= 0) return;
+                const el = document.createElement('div');
+                el.className = 'captured-piece';
+                el.setAttribute('data-player', player);
+                el.setAttribute('data-char', char);
+                // バッジ
+                if (count > 1) {
+                    const badge = document.createElement('div');
+                    badge.className = 'badge';
+                    badge.textContent = count;
+                    el.appendChild(badge);
+                }
+                el.addEventListener('click', e => {
+                    e.stopPropagation();
+                    selectCapturedPiece(el);
+                });
+                container.appendChild(el);
+            });
+        }
+
+        // 手番情報を更新
+        function updateTurnInfo() {
+            const turnInfo = document.getElementById('turn-info');
+            if (isWhiteTurn) {
+                turnInfo.textContent = '後手（白）の番です';
+                turnInfo.classList.add('white-turn');
+            } else {
+                turnInfo.textContent = '先手（黒）の番です';
+                turnInfo.classList.remove('white-turn');
+            }
+        }
+
+        // ===== PeerJS によるオンライン対戦 =====
+        function initPeer() {
+            peer = new Peer();
+            peer.on('open', id => {
+                const myIdEl = document.getElementById('my-id');
+                if (myIdEl) myIdEl.textContent = id;
+                setStatus('接続待ち...');
+            });
+            peer.on('connection', c => {
+                conn = c;
+                isGuest = false;
+                setupConnection();
+            });
+        }
+
+        function setupConnection() {
+            setStatus('対戦中！');
+            if (!conn) return;
+            conn.on('data', handleIncomingData);
+            conn.on('close', () => setStatus('接続切断'));
+            // 接続完了時に最新盤面を送信
+            sendGameState();
+        }
+
+        function handleIncomingData(data) {
+            if (data && typeof data === 'object') {
+                applyGameState(data);
+            }
+        }
+
+        function sendGameState() {
+            if (conn && conn.open) {
+                conn.send({
+                    board: serializeBoard(),
+                    capturedCounts: capturedCounts,
+                    isWhiteTurn: isWhiteTurn
+                });
+            }
+        }
+
+        function serializeBoard() {
+            const board = document.querySelector('.game-board');
+            const squares = Array.from(board.querySelectorAll('.square'));
+            return squares.map(sq => {
+                const p = sq.querySelector('.piece');
+                if (!p) return null;
+                return { player: getPiecePlayer(p), char: p.getAttribute('data-char') };
+            });
+        }
+
+        function setBoardFromArray(arr) {
+            const board = document.querySelector('.game-board');
+            const squares = Array.from(board.querySelectorAll('.square'));
+            squares.forEach((sq, idx) => {
+                const existing = sq.querySelector('.piece');
+                if (existing) existing.remove();
+                const data = arr[idx];
+                if (data) {
+                    const el = document.createElement('div');
+                    el.className = 'piece ' + (data.player === 'sente' ? 'black' : 'white');
+                    el.setAttribute('data-player', data.player);
+                    el.setAttribute('data-char', data.char);
+                    sq.appendChild(el);
+                }
+            });
+            // イベント再設定
+            board.querySelectorAll('.piece').forEach(piece => {
+                piece.addEventListener('click', e => {
+                    e.stopPropagation();
+                    const sq = piece.closest('.square');
+                    selectPiece(piece, sq);
+                });
+            });
+        }
+
+        function serializeCaptured(areaId) {
+            const arr = [];
+            const container = document.getElementById(areaId);
+            if (!container) return arr;
+            container.querySelectorAll('.captured-piece').forEach(cp => {
+                arr.push({ player: cp.getAttribute('data-player'), char: cp.getAttribute('data-char') });
+            });
+            return arr;
+        }
+
+        function setCapturedFromArray(areaId, arr) {
+            const container = document.getElementById(areaId);
+            if (!container) return;
+            container.innerHTML = '';
+            const player = areaId.startsWith('sente') ? 'sente' : 'gote';
+            capturedCounts[player] = {};
+            arr.forEach(data => {
+                const el = document.createElement('div');
+                el.className = 'captured-piece';
+                el.setAttribute('data-player', data.player);
+                el.setAttribute('data-char', data.char);
+                el.addEventListener('click', e => {
+                    e.stopPropagation();
+                    selectCapturedPiece(el);
+                });
+                container.appendChild(el);
+                // count for compatibility
+                const ch = data.char;
+                if (!capturedCounts[player][ch]) capturedCounts[player][ch] = 0;
+                capturedCounts[player][ch]++;
+            });
+            // convert DOM to grouped representation
+            renderCapturedArea(player);
+        }
+
+        function applyGameState(data) {
+            setBoardFromArray(data.board);
+            if (data.capturedCounts) {
+                capturedCounts = data.capturedCounts;
+                renderCapturedArea('sente');
+                renderCapturedArea('gote');
+            } else {
+                // 旧形式
+                setCapturedFromArray('sente-captured', data.senteCaptured || []);
+                setCapturedFromArray('gote-captured', data.goteCaptured || []);
+            }
+            isWhiteTurn = data.isWhiteTurn;
+            updateTurnInfo();
+            clearHighlights();
+            selectedPiece = null;
+            selectedCapturedPiece = null;
+        }
+
+        // グリッド位置を計算
+        // board に `document.querySelector('.game-board')` を渡すと指定盤面で検索できます。
+        function getGridPosition(element, board = document.querySelector('.game-board')) {
+            const square = element.closest('.square');
+            if (!square) return null;
+
+            const squares = Array.from(board.querySelectorAll('.square'));
+            const index = squares.indexOf(square);
+
+            if (index === -1) return null;
+
+            const row = Math.floor(index / 9);
+            const col = index % 9;
+
+            return { row, col, index };
+        }
+
+        // グリッド位置からマスを取得
+        function getSquareAtPosition(row, col, board = document.querySelector('.game-board')) {
+            if (row < 0 || row > 8 || col < 0 || col > 8) return null;
+            
+            const squares = Array.from(board.querySelectorAll('.square'));
+            const index = row * 9 + col;
+            
+            return squares[index];
+        }
+
+        // 駒のプレイヤーを取得
+        function getPiecePlayer(piece) {
+            return piece.getAttribute('data-player');
+        }
+
+        // 駒の色を取得
+        function getPieceColor(piece) {
+            return piece.classList.contains('white') ? 'white' : 'black';
+        }
+
+        // 成り駒を元の状態に戻す
+        function getOriginalChar(char) {
+            const reverseDemotionMap = {
+                'と': '歩',
+                '杏': '香',
+                '圭': '桂',
+                '全': '銀',
+                '龍': '飛',
+                '馬': '角'
+            };
+            return reverseDemotionMap[char] || char;
+        }
+
+        // ===== 王手防止用ユーティリティ =====
+        // 指定盤面上で指定プレイヤーの王が相手に攻撃されているか
+        function isKingInCheck(board, player) {
+            const kingSelector = `.piece[data-player="${player}"][data-char="玉"], .piece[data-player="${player}"][data-char="王"]`;
+            const kingPiece = board.querySelector(kingSelector);
+            if (!kingPiece) return true;
+            const kingSquare = kingPiece.closest('.square');
+            const opponent = player === 'sente' ? 'gote' : 'sente';
+            const opponentPieces = board.querySelectorAll(`.piece[data-player="${opponent}"]`);
+            for (const op of opponentPieces) {
+                const sq = op.closest('.square');
+                const moves = calculateValidMoves(op, sq, board, { checkSafety: false });
+                if (moves.includes(kingSquare)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // ある手が安全か判定（盤上移動）
+        function isMoveSafe(piece, fromSquare, toSquare) {
+            const board = document.querySelector('.game-board');
+            const clone = board.cloneNode(true);
+            const fromPos = getGridPosition(fromSquare, board);
+            const toPos = getGridPosition(toSquare, board);
+            if (!fromPos || !toPos) return false;
+            const cloneSquares = Array.from(clone.querySelectorAll('.square'));
+            const cloneFrom = cloneSquares[fromPos.index];
+            const cloneTo = cloneSquares[toPos.index];
+            const clonePiece = cloneFrom.querySelector('.piece');
+            if (!clonePiece) return true;
+            const captured = cloneTo.querySelector('.piece');
+            if (captured) cloneTo.removeChild(captured);
+            cloneFrom.removeChild(clonePiece);
+            cloneTo.appendChild(clonePiece);
+
+            const player = getPiecePlayer(piece);
+            const pieceChar = piece.getAttribute('data-char');
+
+            // プロモーションの可能性判定
+            const inZone = (player === 'sente' && toPos.row <= 2) || (player === 'gote' && toPos.row >= 6);
+            const promotable = ['歩','香','桂','銀','飛','角'].includes(pieceChar);
+            let safeWithout = !isKingInCheck(clone, player);
+            if (!promotable) return safeWithout;
+
+            // プロモーションを適用した場合の安全性も確認
+            let safeWith = safeWithout;
+            // 一番奥での強制成り判定
+            const mustPromote = (['歩','香'].includes(pieceChar) && ((player === 'sente' && toPos.row === 0) || (player === 'gote' && toPos.row === 8)));
+            if (inZone) {
+                const promotionMap = {
+                    '歩': 'と',
+                    '香': '杏',
+                    '桂': '圭',
+                    '銀': '全',
+                    '飛': '龍',
+                    '角': '馬'
+                };
+                const newChar = promotionMap[pieceChar] || pieceChar;
+                clonePiece.setAttribute('data-char', newChar);
+                clonePiece.classList.add('promoted');
+                safeWith = !isKingInCheck(clone, player);
+            }
+
+            if (mustPromote) return safeWith;
+            return safeWithout || safeWith;
+        }
+
+        // 持ち駒を打つ手が安全か判定
+        function isDropSafe(charLabel, player, targetSquare) {
+            const board = document.querySelector('.game-board');
+            const clone = board.cloneNode(true);
+            const pos = getGridPosition(targetSquare, board);
+            if (!pos) return false;
+            const cloneSquares = Array.from(clone.querySelectorAll('.square'));
+            const cloneTarget = cloneSquares[pos.index];
+            const newPiece = document.createElement('div');
+            newPiece.className = 'piece ' + (player === 'sente' ? 'black' : 'white');
+            newPiece.setAttribute('data-player', player);
+            newPiece.setAttribute('data-char', charLabel);
+            cloneTarget.appendChild(newPiece);
+            return !isKingInCheck(clone, player);
+        }
+
+        // 移動候補の配列から安全な手だけを返す
+        function filterSafeMoves(piece, fromSquare, moves) {
+            return moves.filter(to => isMoveSafe(piece, fromSquare, to));
+        }
+
+        // 持ち駒を追加
+        function addCapturedPiece(piece) {
+            let charLabel = piece.getAttribute('data-char');
+            charLabel = getOriginalChar(charLabel);
+            const newPlayer = isWhiteTurn ? 'gote' : 'sente';
+            if (!capturedCounts[newPlayer][charLabel]) {
+                capturedCounts[newPlayer][charLabel] = 0;
+            }
+            capturedCounts[newPlayer][charLabel]++;
+            renderCapturedArea(newPlayer);
+        }
+
+        // 持ち駒を選択
+        function selectCapturedPiece(el) {
+            if (gameOver) return;
+            const player = el.getAttribute('data-player');
+            const charLabel = el.getAttribute('data-char');
+            const isMyPiece = (!isWhiteTurn && player === 'sente') || (isWhiteTurn && player === 'gote');
+            if (!isMyPiece) return;
+            if (selectedCapturedPiece) {
+                selectedCapturedPiece.element.classList.remove('selected');
+            }
+            if (selectedPiece) {
+                selectedPiece.piece.classList.remove('selected');
+                clearHighlights();
+                selectedPiece = null;
+                validMoves = [];
+            }
+            selectedCapturedPiece = { player, charLabel, element: el };
+            el.classList.add('selected');
+        }
+
+        // 駒が成った状態かチェック
+        function isPromoted(piece) {
+            const char = piece.getAttribute('data-char');
+            return ['と', '成銀', '成桂', '成香', '龍', '馬'].includes(char);
+        }
+
+        // 移動可能なマスを計算
+        // board はデフォルトで実際の盤面。シミュレーション用にコピーした盤面を渡せる。
+        // オプション { checkSafety } を false にすると安全チェック（王手放置防止）を行わない。
+        function calculateValidMoves(piece, square, board = document.querySelector('.game-board'), options = { checkSafety: true }) {
+            const pos = getGridPosition(square, board);
+            if (!pos) return [];
+
+            let moves = [];
+            const piecePlayer = getPiecePlayer(piece);
+            const pieceChar = piece.getAttribute('data-char');
+
+            if (pieceChar === '歩' || pieceChar === 'と') {
+                // 歩は1マス前へのみ、「と」は金と同じ
+                if (pieceChar === 'と') {
+                    let directions;
+                    if (piecePlayer === 'sente') {
+                        directions = [[-1, 0], [-1, -1], [-1, 1], [0, -1], [0, 1], [1, 0]];
+                    } else {
+                        directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
+                    }
+                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                } else {
+                    const directions = piecePlayer === 'sente' ? [[-1, 0]] : [[1, 0]];
+                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                }
+
+            } else if (pieceChar === '玉' || pieceChar === '王') {
+                // 玉は8方向1マス
+                const directions = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+                addNearbyMoves(pos, directions, piecePlayer, moves);
+
+            } else if (pieceChar === '金' || pieceChar === '全') {
+                // 金/全: 前、斜め前、左右、後ろ
+                let directions;
+                if (piecePlayer === 'sente') {
+                    directions = [[-1, 0], [-1, -1], [-1, 1], [0, -1], [0, 1], [1, 0]];
+                } else {
+                    directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
+                }
+                addNearbyMoves(pos, directions, piecePlayer, moves);
+
+            } else if (pieceChar === '銀') {
+                // 銀: 前、斜め前、斜め後ろ
+                let directions;
+                if (piecePlayer === 'sente') {
+                    // 先手: 上、左上、右上、左下、右下
+                    directions = [[-1, 0], [-1, -1], [-1, 1], [1, -1], [1, 1]];
+                } else {
+                    // 後手: 下、左下、右下、左上、右上
+                    directions = [[1, 0], [1, -1], [1, 1], [-1, -1], [-1, 1]];
+                }
+                addNearbyMoves(pos, directions, piecePlayer, moves);
+
+            } else if (pieceChar === '桂' || pieceChar === '圅') {
+                // 桂馬: 前に2マス横に1マス、圅は金と同じ
+                if (pieceChar === '圅') {
+                    let directions;
+                    if (piecePlayer === 'sente') {
+                        directions = [[-1, 0], [-1, -1], [-1, 1], [0, -1], [0, 1], [1, 0]];
+                    } else {
+                        directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
+                    }
+                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                } else {
+                    const directions = piecePlayer === 'sente'
+                        ? [[-2, -1], [-2, 1]]
+                        : [[2, -1], [2, 1]];
+                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                }
+
+            } else if (pieceChar === '香' || pieceChar === '杉') {
+                // 香車: 前方向に走り駒、杉は金と同じ
+                if (pieceChar === '杉') {
+                    let directions;
+                    if (piecePlayer === 'sente') {
+                        directions = [[-1, 0], [-1, -1], [-1, 1], [0, -1], [0, 1], [1, 0]];
+                    } else {
+                        directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
+                    }
+                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                } else {
+                    const direction = piecePlayer === 'sente' ? [-1, 0] : [1, 0];
+                    addSlidingMoves(pos, [direction], piecePlayer, moves);
+                }
+
+            } else if (pieceChar === '飛' || pieceChar === '龍') {
+                // 飛車: 上下左右に走り駒、龍は飛車の動き+周囲1マス
+                const slidingDirections = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+                addSlidingMoves(pos, slidingDirections, piecePlayer, moves);
+                if (pieceChar === '龍') {
+                    // 周囲1マスの8方向も追加
+                    const nearbyDirections = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+                    addNearbyMoves(pos, nearbyDirections, piecePlayer, moves, board);
+                }
+
+            } else if (pieceChar === '角' || pieceChar === '馬') {
+                // 角行: 斜め4方向に走り駒、馬は角の動き+周囲1マス
+                const slidingDirections = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+                addSlidingMoves(pos, slidingDirections, piecePlayer, moves);
+                if (pieceChar === '馬') {
+                    // 周囲1マスの上下左右も追加
+                    const nearbyDirections = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+                    addNearbyMoves(pos, nearbyDirections, piecePlayer, moves, board);
+                }
+            }
+
+            // 王手放置禁止：必要ならシミュレーションして安全な手のみ返す
+            if (options.checkSafety) {
+                moves = filterSafeMoves(piece, square, moves);
+            }
+            return moves;
+        }
+
+        // 近接駒の移動可能マスを追加
+        // board を渡せば指定盤面での探索が可能（シミュレーション用）
+        function addNearbyMoves(pos, directions, piecePlayer, moves, board = document.querySelector('.game-board')) {
+            for (const [dr, dc] of directions) {
+                const newRow = pos.row + dr;
+                const newCol = pos.col + dc;
+
+                if (newRow < 0 || newRow > 8 || newCol < 0 || newCol > 8) continue;
+
+                const targetSquare = getSquareAtPosition(newRow, newCol, board);
+                if (!targetSquare) continue;
+
+                const targetPiece = targetSquare.querySelector('.piece');
+
+                if (!targetPiece) {
+                    moves.push(targetSquare);
+                } else if (getPiecePlayer(targetPiece) !== piecePlayer) {
+                    moves.push(targetSquare);
+                }
+            }
+        }
+
+        // 走り駒の移動可能マスを追加
+        function addSlidingMoves(pos, directions, piecePlayer, moves, board = document.querySelector('.game-board')) {
+            for (const [dr, dc] of directions) {
+                let r = pos.row + dr;
+                let c = pos.col + dc;
+
+                while (r >= 0 && r <= 8 && c >= 0 && c <= 8) {
+                    const targetSquare = getSquareAtPosition(r, c, board);
+                    if (!targetSquare) break;
+
+                    const targetPiece = targetSquare.querySelector('.piece');
+
+                    if (!targetPiece) {
+                        moves.push(targetSquare);
+                    } else if (getPiecePlayer(targetPiece) !== piecePlayer) {
+                        moves.push(targetSquare);
+                        break; // 敵の駒で止まる
+                    } else {
+                        break; // 味方の駒で止まる
+                    }
+
+                    r += dr;
+                    c += dc;
+                }
+            }
+        }
+
+        // 移動可能マスをハイライト
+        function highlightValidMoves(moves) {
+            moves.forEach(square => {
+                square.classList.add('valid-move');
+            });
+        }
+
+        // ハイライトをクリア
+        function clearHighlights() {
+            const board = document.querySelector('.game-board');
+            board.querySelectorAll('.square.valid-move').forEach(square => {
+                square.classList.remove('valid-move');
+            });
+        }
+
+        // 駒を選択
+        function selectPiece(piece, square) {
+            if (gameOver) return;
+            
+            const piecePlayer = getPiecePlayer(piece);
+
+            const isMyPiece = (!isWhiteTurn && piecePlayer === 'sente') || (isWhiteTurn && piecePlayer === 'gote');
+            if (!isMyPiece) {
+                return;
+            }
+
+            if (selectedPiece) {
+                selectedPiece.piece.classList.remove('selected');
+                clearHighlights();
+            }
+
+            selectedPiece = { piece, square };
+            piece.classList.add('selected');
+
+            validMoves = calculateValidMoves(piece, square);
+            // 念のため二重チェック、calculateValidMoves でもフィルタ済み
+            validMoves = filterSafeMoves(piece, square, validMoves);
+            highlightValidMoves(validMoves);
+        }
+
+        // 駒を移動
+        function movePiece(targetSquare) {
+            if (!selectedPiece) return;
+            if (gameOver) return;
+
+            const piece = selectedPiece.piece;
+            const fromSquare = selectedPiece.square;
+            const piecePlayer = getPiecePlayer(piece);
+
+            if (!validMoves.includes(targetSquare)) return;
+
+            // 事前安全確認
+            if (!isMoveSafe(piece, fromSquare, targetSquare)) {
+                alert('王手を回避してください！');
+                piece.classList.remove('selected');
+                clearHighlights();
+                selectedPiece = null;
+                validMoves = [];
+                return;
+            }
+
+            // キャプチャ対象を保持しておく
+            const existing = targetSquare.querySelector('.piece');
+            let capturedPiece = null;
+            let capturedChar = null;
+            if (existing) {
+                capturedChar = existing.getAttribute('data-char');
+                if (capturedChar === '王' || capturedChar === '玉') {
+                    const winner = isWhiteTurn ? '後手' : '先手';
+                    addCapturedPiece(existing);
+                    existing.remove();
+                    targetSquare.appendChild(piece);
+                    piece.classList.remove('selected');
+                    clearHighlights();
+                    endGame(winner);
+                    return;
+                }
+                capturedPiece = existing;
+                existing.remove();
+            }
+
+            // 実際に駒を移動
+            targetSquare.appendChild(piece);
+
+            // 成り判定
+            const targetPos = getGridPosition(piece);
+            const pieceChar = piece.getAttribute('data-char');
+            let shouldPromote = false;
+            let canPromote = false;
+
+            if (piecePlayer === 'sente' && targetPos.row <= 2) {
+                canPromote = true;
+            } else if (piecePlayer === 'gote' && targetPos.row >= 6) {
+                canPromote = true;
+            }
+            if (canPromote && ['歩', '香'].includes(pieceChar)) {
+                const futurePos = { row: targetPos.row + (piecePlayer === 'sente' ? -1 : 1), col: targetPos.col };
+                if (futurePos.row < 0 || futurePos.row > 8) {
+                    shouldPromote = true;
+                }
+            }
+
+            let promoted = false;
+            if (shouldPromote) {
+                promotePiece(piece);
+                promoted = true;
+            } else if (canPromote && ['歩', '香', '桂', '銀', '飛', '角'].includes(pieceChar)) {
+                const res = showPromotionDialog(piece, pieceChar, piecePlayer);
+                if (res) promoted = true;
+            }
+
+            // 移動後の安全性確認（プロモーション判断後）
+            if (isKingInCheck(document.querySelector('.game-board'), piecePlayer)) {
+                alert('王手を回避してください！');
+                // 元に戻す
+                targetSquare.removeChild(piece);
+                fromSquare.appendChild(piece);
+                if (promoted) {
+                    piece.setAttribute('data-char', pieceChar);
+                    piece.classList.remove('promoted');
+                }
+                if (capturedPiece) {
+                    targetSquare.appendChild(capturedPiece);
+                }
+                piece.classList.remove('selected');
+                clearHighlights();
+                selectedPiece = null;
+                validMoves = [];
+                return;
+            }
+
+            // 安全ならキャプチャ確定
+            if (capturedPiece) {
+                addCapturedPiece(capturedPiece);
+            }
+
+            piece.classList.remove('selected');
+            clearHighlights();
+            selectedPiece = null;
+            validMoves = [];
+
+            isWhiteTurn = !isWhiteTurn;
+            updateTurnInfo();
+            sendGameState();
+        }
+        
+        // 成ることができるかチェック（移動後）
+        function canMoveFuture(piece, square) {
+            // 簡易的で構いません
+            return true;
+        }
+        
+        // 成らせる処理
+        function promotePiece(piece) {
+            const currentChar = piece.getAttribute('data-char');
+            let newChar = currentChar;
+            
+            const promotionMap = {
+                '歩': 'と',
+                '香': '杏',
+                '桂': '圭',
+                '銀': '全',
+                '飛': '龍',
+                '角': '馬'
+            };
+            
+            if (promotionMap[currentChar]) {
+                newChar = promotionMap[currentChar];
+                piece.setAttribute('data-char', newChar);
+                piece.classList.add('promoted');
+            }
+        }
+        
+        // 成るかどうかの確認ダイアログ
+        function showPromotionDialog(piece, pieceChar, piecePlayer) {
+            const result = confirm(`${pieceChar}を成りますか？`);
+            if (result) {
+                promotePiece(piece);
+            }
+            return result;
+        }
+
+        // 持ち駒を盤面に配置
+        function placeCapturedPiece(targetSquare) {
+            if (gameOver) return;
+            if (!selectedCapturedPiece) return;
+            if (targetSquare.querySelector('.piece')) return;
+
+            const charLabel = selectedCapturedPiece.charLabel;
+            const player = selectedCapturedPiece.player;
+
+            // 二歩判定
+            if (charLabel === '歩') {
+                const targetPos = getGridPosition(targetSquare);
+                if (targetPos) {
+                    for (let row = 0; row < 9; row++) {
+                        const checkSquare = getSquareAtPosition(row, targetPos.col);
+                        if (checkSquare && checkSquare !== targetSquare) {
+                            const existingPiece = checkSquare.querySelector('.piece');
+                            if (existingPiece && 
+                                getPiecePlayer(existingPiece) === player && 
+                                existingPiece.getAttribute('data-char') === '歩') {
+                                alert('二歩は反則です！');
+                                selectedCapturedPiece.element.classList.remove('selected');
+                                selectedCapturedPiece = null;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (!isDropSafe(charLabel, player, targetSquare)) {
+                alert('王手を回避してください！');
+                selectedCapturedPiece.element.classList.remove('selected');
+                selectedCapturedPiece = null;
+                return;
+            }
+
+            const newPiece = document.createElement('div');
+            newPiece.className = 'piece ' + (player === 'sente' ? 'black' : 'white');
+            newPiece.setAttribute('data-player', player);
+            newPiece.setAttribute('data-char', charLabel);
+            targetSquare.appendChild(newPiece);
+            newPiece.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const sq = this.closest('.square');
+                selectPiece(this, sq);
+            });
+
+            // 集計から1枚減らす
+            if (capturedCounts[player] && capturedCounts[player][charLabel]) {
+                capturedCounts[player][charLabel]--;
+                if (capturedCounts[player][charLabel] <= 0) {
+                    delete capturedCounts[player][charLabel];
+                }
+            }
+            renderCapturedArea(player);
+
+            selectedCapturedPiece = null;
+            isWhiteTurn = !isWhiteTurn;
+            updateTurnInfo();
+            sendGameState();
+        }
+
+        // ゲーム終了処理
+        function endGame(winner) {
+            gameOver = true;
+            const overlay = document.getElementById('game-over-overlay');
+            const title = document.getElementById('game-over-title');
+            const text = document.getElementById('game-over-text');
+            
+            title.textContent = winner + 'の勝利！';
+            text.textContent = '対局終了';
+            overlay.classList.add('show');
+        }
+
+        // ゲームリセット
+        function resetGame() {
+            // ページをリロード
+            location.reload();
+        }
+
+        // ゲーム初期化
+        window.addEventListener('load', () => {
+            updateTurnInfo();
+            initPeer();
+            document.getElementById('connect-button').addEventListener('click', () => {
+                const target = document.getElementById('peer-id-input').value.trim();
+                if (!target || !peer) return;
+                conn = peer.connect(target);
+                isGuest = true;
+                conn.on('open', () => {
+                    setupConnection();
+                    document.body.classList.add('guest-view');
+                });
+                conn.on('data', handleIncomingData);
+            });
+            
+            const board = document.querySelector('.game-board');
+
+            board.querySelectorAll('.piece').forEach(piece => {
+                piece.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const square = piece.closest('.square');
+                    selectPiece(piece, square);
+                });
+            });
+
+            board.querySelectorAll('.square').forEach(square => {
+                square.addEventListener('click', () => {
+                    if (selectedCapturedPiece) {
+                        placeCapturedPiece(square);
+                    } else if (selectedPiece && validMoves.includes(square)) {
+                        movePiece(square);
+                    } else if (selectedPiece && selectedPiece.square === square) {
+                        selectedPiece.piece.classList.remove('selected');
+                        clearHighlights();
+                        selectedPiece = null;
+                        validMoves = [];
+                    } else if (square.querySelector('.piece')) {
+                        const piece = square.querySelector('.piece');
+                        selectPiece(piece, square);
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
