@@ -49,6 +49,16 @@
             updateAuthUI(user);
         });
 
+        function undoMove() {
+            console.log('待った実行: 現在の履歴数 = ', gameHistory.length);
+            if (gameHistory.length === 0) return;
+            const prev = gameHistory.pop();
+            applyGameState(prev);
+            sendGameState();
+        }
+        // グローバルに公開
+        window.undoMove = undoMove;
+
         // expose for use elsewhere
         window.firebaseAuth = auth;
         window.firebaseSignIn = () => {
@@ -491,6 +501,7 @@
     <div id="auth-ui" style="margin-bottom:10px; text-align:center; color:#d4a574;">
         <button id="google-login-btn" style="padding:5px 10px;">Googleでログイン</button>
         <span id="profile-container" style="margin-left:20px;"></span>
+        <button id="undo-btn" style="padding:5px 10px; margin-left:20px;">待った (Undo)</button>
     </div>
     <!-- ネットワーク対戦UI -->
     <div id="network-ui" style="margin-bottom:20px; text-align:center; color:#d4a574;">
@@ -647,6 +658,18 @@
 
         // 持ち駒集計
         let capturedCounts = { sente: {}, gote: {} };
+        // 履歴スタック（待った用）
+        let gameHistory = [];
+
+        function pushHistory() {
+            // 深いコピーで現在状態を保存
+            const state = {
+                board: serializeBoard(),
+                capturedCounts: JSON.parse(JSON.stringify(capturedCounts)),
+                isWhiteTurn: isWhiteTurn
+            };
+            gameHistory.push(state);
+        }
 
         // ネットワーク対戦関連
         let peer = null;
@@ -893,6 +916,137 @@
                 }
             }
             return false;
+        }
+
+        // 王手判定関数
+        function isCheck(boardData, player) {
+            return isKingInCheck(boardData, player);
+        }
+
+        // 詰み判定関数
+        function isCheckmate(player) {
+            const board = document.querySelector('.game-board');
+            
+            // まず王手されているか確認
+            if (!isCheck(board, player)) {
+                return false; // 王手されていなければ詰みではない
+            }
+
+            // 盤面上のすべての駒の移動をシミュレーション
+            const playerPieces = board.querySelectorAll(`.piece[data-player="${player}"]`);
+            for (const piece of playerPieces) {
+                const square = piece.closest('.square');
+                if (!square) continue;
+
+                // この駒の移動候補（安全チェックなし）を取得
+                const possibleMoves = calculateValidMoves(piece, square, board, { checkSafety: false });
+
+                for (const targetSquare of possibleMoves) {
+                    // 盤面をシミュレーション
+                    const clone = board.cloneNode(true);
+                    
+                    // クローン上で同じ駒を探す
+                    const fromPos = getGridPosition(square, board);
+                    const toPos = getGridPosition(targetSquare, board);
+                    if (!fromPos || !toPos) continue;
+
+                    const cloneSquares = Array.from(clone.querySelectorAll('.square'));
+                    const cloneFromSquare = cloneSquares[fromPos.index];
+                    const cloneToSquare = cloneSquares[toPos.index];
+                    const clonePiece = cloneFromSquare.querySelector('.piece');
+
+                    if (!clonePiece) continue;
+
+                    // 駒を移動
+                    const capturedPiece = cloneToSquare.querySelector('.piece');
+                    if (capturedPiece) cloneToSquare.removeChild(capturedPiece);
+                    
+                    cloneFromSquare.removeChild(clonePiece);
+                    cloneToSquare.appendChild(clonePiece);
+
+                    // プロモーション判定
+                    const pieceChar = piece.getAttribute('data-char');
+                    const promotable = ['歩', '香', '桂', '銀', '飛', '角'].includes(pieceChar);
+                    if (promotable) {
+                        const inZone = (player === 'sente' && toPos.row <= 2) || (player === 'gote' && toPos.row >= 6);
+                        const mustPromote = (['歩', '香'].includes(pieceChar) && 
+                            ((player === 'sente' && toPos.row === 0) || (player === 'gote' && toPos.row === 8)));
+                        
+                        if (mustPromote || (inZone && confirm === undefined)) {
+                            const promotionMap = {
+                                '歩': 'と',
+                                '香': '杏',
+                                '桂': '圭',
+                                '銀': '全',
+                                '飛': '龍',
+                                '角': '馬'
+                            };
+                            if (promotionMap[pieceChar]) {
+                                clonePiece.setAttribute('data-char', promotionMap[pieceChar]);
+                                clonePiece.classList.add('promoted');
+                            }
+                        }
+                    }
+
+                    // 王手が解除されたか確認
+                    if (!isCheck(clone, player)) {
+                        return false; // 詰みではない
+                    }
+                }
+            }
+
+            // 持ち駒の打ち込みをシミュレーション
+            const capturedPieces = capturedCounts[player] || {};
+            for (const charLabel in capturedPieces) {
+                if (capturedPieces[charLabel] <= 0) continue;
+
+                // 盤面のすべての空きマスに打ってみる
+                const board = document.querySelector('.game-board');
+                const squares = Array.from(board.querySelectorAll('.square'));
+                
+                for (const targetSquare of squares) {
+                    if (targetSquare.querySelector('.piece')) continue; // 駒が置いてある場合スキップ
+
+                    // 二歩チェック
+                    if (charLabel === '歩') {
+                        const targetPos = getGridPosition(targetSquare, board);
+                        let hasPawnInCol = false;
+                        for (let row = 0; row < 9; row++) {
+                            const checkSquare = getSquareAtPosition(row, targetPos.col, board);
+                            if (checkSquare && checkSquare !== targetSquare) {
+                                const existingPiece = checkSquare.querySelector('.piece');
+                                if (existingPiece && getPiecePlayer(existingPiece) === player && 
+                                    existingPiece.getAttribute('data-char') === '歩') {
+                                    hasPawnInCol = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (hasPawnInCol) continue;
+                    }
+
+                    // 盤面をシミュレーション
+                    const clone = board.cloneNode(true);
+                    const toPos = getGridPosition(targetSquare, board);
+                    if (!toPos) continue;
+
+                    const cloneSquares = Array.from(clone.querySelectorAll('.square'));
+                    const cloneTarget = cloneSquares[toPos.index];
+                    
+                    const newPiece = document.createElement('div');
+                    newPiece.className = 'piece ' + (player === 'sente' ? 'black' : 'white');
+                    newPiece.setAttribute('data-player', player);
+                    newPiece.setAttribute('data-char', charLabel);
+                    cloneTarget.appendChild(newPiece);
+
+                    // 王手が解除されたか確認
+                    if (!isCheck(clone, player)) {
+                        return false; // 詰みではない
+                    }
+                }
+            }
+
+            return true; // すべての手を試しても王手が解除できなければ詰み
         }
 
         // ある手が安全か判定（盤上移動）
@@ -1210,6 +1364,10 @@
             if (!selectedPiece) return;
             if (gameOver) return;
 
+            // 保存を先行
+            pushHistory();
+            console.log('履歴保存: ', gameHistory.length);
+
             const piece = selectedPiece.piece;
             const fromSquare = selectedPiece.square;
             const piecePlayer = getPiecePlayer(piece);
@@ -1232,14 +1390,14 @@
             let capturedChar = null;
             if (existing) {
                 capturedChar = existing.getAttribute('data-char');
+                // 王を取る操作は禁止
                 if (capturedChar === '王' || capturedChar === '玉') {
-                    const winner = isWhiteTurn ? '後手' : '先手';
-                    addCapturedPiece(existing);
-                    existing.remove();
-                    targetSquare.appendChild(piece);
+                    alert('王を直接取ることはできません！詰みで勝利が決まります。');
                     piece.classList.remove('selected');
                     clearHighlights();
-                    endGame(winner);
+                    selectedPiece = null;
+                    validMoves = [];
+                    gameHistory.pop(); // 履歴をキャンセル
                     return;
                 }
                 capturedPiece = existing;
@@ -1293,6 +1451,7 @@
                 clearHighlights();
                 selectedPiece = null;
                 validMoves = [];
+                gameHistory.pop(); // 履歴をキャンセル
                 return;
             }
 
@@ -1309,6 +1468,16 @@
             isWhiteTurn = !isWhiteTurn;
             updateTurnInfo();
             sendGameState();
+
+            // 詰み判定
+            setTimeout(() => {
+                const opponent = isWhiteTurn ? 'gote' : 'sente';
+                if (isCheckmate(opponent)) {
+                    const opponentLabel = isWhiteTurn ? '後手' : '先手';
+                    const winner = isWhiteTurn ? '先手' : '後手';
+                    endGameCheckmate(winner, opponentLabel);
+                }
+            }, 100);
         }
         
         // 成ることができるかチェック（移動後）
@@ -1353,6 +1522,9 @@
             if (!selectedCapturedPiece) return;
             if (targetSquare.querySelector('.piece')) return;
 
+            // 履歴保存
+            pushHistory();
+
             const charLabel = selectedCapturedPiece.charLabel;
             const player = selectedCapturedPiece.player;
 
@@ -1370,6 +1542,7 @@
                                 alert('二歩は反則です！');
                                 selectedCapturedPiece.element.classList.remove('selected');
                                 selectedCapturedPiece = null;
+                                gameHistory.pop(); // 履歴をキャンセル
                                 return;
                             }
                         }
@@ -1381,6 +1554,7 @@
                 alert('王手を回避してください！');
                 selectedCapturedPiece.element.classList.remove('selected');
                 selectedCapturedPiece = null;
+                gameHistory.pop(); // 履歴をキャンセル
                 return;
             }
 
@@ -1408,6 +1582,28 @@
             isWhiteTurn = !isWhiteTurn;
             updateTurnInfo();
             sendGameState();
+
+            // 詰み判定
+            setTimeout(() => {
+                const opponent = isWhiteTurn ? 'gote' : 'sente';
+                if (isCheckmate(opponent)) {
+                    const opponentLabel = isWhiteTurn ? '後手' : '先手';
+                    const winner = isWhiteTurn ? '先手' : '後手';
+                    endGameCheckmate(winner, opponentLabel);
+                }
+            }, 100);
+        }
+
+        // ゲーム終了処理（詰み）
+        function endGameCheckmate(winner, loser) {
+            gameOver = true;
+            const overlay = document.getElementById('game-over-overlay');
+            const title = document.getElementById('game-over-title');
+            const text = document.getElementById('game-over-text');
+            
+            title.textContent = '詰み！' + winner + 'の勝利！';
+            text.textContent = loser + 'の王が詰みました。';
+            overlay.classList.add('show');
         }
 
         // ゲーム終了処理
@@ -1435,6 +1631,10 @@
             const loginBtn = document.getElementById('google-login-btn');
             if (loginBtn) loginBtn.addEventListener('click', () => {
                 window.firebaseSignIn();
+            });
+            const undoBtn = document.getElementById('undo-btn');
+            if (undoBtn) undoBtn.addEventListener('click', () => {
+                if (window.undoMove) window.undoMove();
             });
 
             document.getElementById('connect-button').addEventListener('click', () => {
@@ -1480,4 +1680,3 @@
     </script>
 </body>
 </html>
-
