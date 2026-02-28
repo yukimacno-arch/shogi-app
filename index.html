@@ -1307,16 +1307,16 @@
                     } else {
                         directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
                     }
-                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                    addNearbyMoves(pos, directions, piecePlayer, moves, board);
                 } else {
                     const directions = piecePlayer === 'sente' ? [[-1, 0]] : [[1, 0]];
-                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                    addNearbyMoves(pos, directions, piecePlayer, moves, board);
                 }
 
             } else if (pieceChar === '玉' || pieceChar === '王') {
                 // 玉は8方向1マス
                 const directions = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
-                addNearbyMoves(pos, directions, piecePlayer, moves);
+                addNearbyMoves(pos, directions, piecePlayer, moves, board);
 
             } else if (pieceChar === '金' || pieceChar === '全') {
                 // 金/全: 前、斜め前、左右、後ろ
@@ -1326,7 +1326,7 @@
                 } else {
                     directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
                 }
-                addNearbyMoves(pos, directions, piecePlayer, moves);
+                addNearbyMoves(pos, directions, piecePlayer, moves, board);
 
             } else if (pieceChar === '銀') {
                 // 銀: 前、斜め前、斜め後ろ
@@ -1338,7 +1338,7 @@
                     // 後手: 下、左下、右下、左上、右上
                     directions = [[1, 0], [1, -1], [1, 1], [-1, -1], [-1, 1]];
                 }
-                addNearbyMoves(pos, directions, piecePlayer, moves);
+                addNearbyMoves(pos, directions, piecePlayer, moves, board);
 
             } else if (pieceChar === '桂' || pieceChar === '圭') {
                 // 桂馬: 前に2マス横に1マス、圭は成桂（金と同じ）
@@ -1349,12 +1349,12 @@
                     } else {
                         directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
                     }
-                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                    addNearbyMoves(pos, directions, piecePlayer, moves, board);
                 } else {
                     const directions = piecePlayer === 'sente'
                         ? [[-2, -1], [-2, 1]]
                         : [[2, -1], [2, 1]];
-                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                    addNearbyMoves(pos, directions, piecePlayer, moves, board);
                 }
 
             } else if (pieceChar === '香' || pieceChar === '杏') {
@@ -1366,16 +1366,16 @@
                     } else {
                         directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
                     }
-                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                    addNearbyMoves(pos, directions, piecePlayer, moves, board);
                 } else {
                     const direction = piecePlayer === 'sente' ? [-1, 0] : [1, 0];
-                    addSlidingMoves(pos, [direction], piecePlayer, moves);
+                    addSlidingMoves(pos, [direction], piecePlayer, moves, board);
                 }
 
             } else if (pieceChar === '飛' || pieceChar === '龍') {
                 // 飛車: 上下左右に走り駒、龍は飛車の動き+周囲1マス
                 const slidingDirections = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-                addSlidingMoves(pos, slidingDirections, piecePlayer, moves);
+                addSlidingMoves(pos, slidingDirections, piecePlayer, moves, board);
                 if (pieceChar === '龍') {
                     // 周囲1マスの8方向も追加
                     const nearbyDirections = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
@@ -1385,7 +1385,7 @@
             } else if (pieceChar === '角' || pieceChar === '馬') {
                 // 角行: 斜め4方向に走り駒、馬は角の動き+周囲1マス
                 const slidingDirections = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
-                addSlidingMoves(pos, slidingDirections, piecePlayer, moves);
+                addSlidingMoves(pos, slidingDirections, piecePlayer, moves, board);
                 if (pieceChar === '馬') {
                     // 周囲1マスの上下左右も追加
                     const nearbyDirections = [[-1, 0], [1, 0], [0, -1], [0, 1]];
