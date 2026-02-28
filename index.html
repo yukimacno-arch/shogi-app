@@ -904,52 +904,150 @@
         function isKingInCheck(board, player) {
             const kingSelector = `.piece[data-player="${player}"][data-char="玉"], .piece[data-player="${player}"][data-char="王"]`;
             const kingPiece = board.querySelector(kingSelector);
-            if (!kingPiece) return true;
+            if (!kingPiece) return true; // 王がない = 詰んでいる
+            
             const kingSquare = kingPiece.closest('.square');
             const opponent = player === 'sente' ? 'gote' : 'sente';
             const opponentPieces = board.querySelectorAll(`.piece[data-player="${opponent}"]`);
+            
             for (const op of opponentPieces) {
                 const sq = op.closest('.square');
+                if (!sq) continue;
+                
+                const opChar = op.getAttribute('data-char');
                 const moves = calculateValidMoves(op, sq, board, { checkSafety: false });
+                
                 if (moves.includes(kingSquare)) {
+                    // デバッグ出力（詳細）
+                    const opPos = getGridPosition(sq, board);
+                    const kingPos = getGridPosition(kingSquare, board);
+                    console.log(`[王手判定] ${opponent}の${opChar}(${opPos.row},${opPos.col})が${player}の王(${kingPos.row},${kingPos.col})を攻撃`);
                     return true;
                 }
             }
             return false;
         }
 
-        // 王手判定関数
-        function isCheck(boardData, player) {
-            return isKingInCheck(boardData, player);
+        // 王手判定関数 - 無限ループ防止版
+        // 仮想盤面 boardState で、指定 player の王が王手されているかを判定
+        function isCheck(boardState, player) {
+            // 1. 王の探索
+            const kingSelector = `.piece[data-player="${player}"][data-char="玉"], .piece[data-player="${player}"][data-char="王"]`;
+            const kingPiece = boardState.querySelector(kingSelector);
+            if (!kingPiece) {
+                console.log(`[isCheck] ${player}の王が見つかりません`);
+                return true; // 王がない = 詰んでいる状態
+            }
+            
+            const kingSquare = kingPiece.closest('.square');
+            if (!kingSquare) {
+                console.log(`[isCheck] ${player}の王の所属する square が見つかりません`);
+                return true;
+            }
+
+            // 2. 敵駒の利きチェック
+            const opponent = player === 'sente' ? 'gote' : 'sente';
+            const opponentPieces = boardState.querySelectorAll(`.piece[data-player="${opponent}"]`);
+            
+            for (const opponentPiece of opponentPieces) {
+                const opponentSquare = opponentPiece.closest('.square');
+                if (!opponentSquare) continue;
+
+                // 敵駒の移動可能なマスを計算（checkSafety: false で無限ループ防止）
+                const opponentMoves = calculateValidMoves(opponentPiece, opponentSquare, boardState, { checkSafety: false });
+
+                // 3. 王手の判定
+                if (opponentMoves.includes(kingSquare)) {
+                    // 王手されている
+                    const opChar = opponentPiece.getAttribute('data-char');
+                    const opPos = getGridPosition(opponentSquare, boardState);
+                    const kingPos = getGridPosition(kingSquare, boardState);
+                    console.log(`[isCheck判定] ${opponent}の${opChar}(${opPos.row},${opPos.col})が${player}の王(${kingPos.row},${kingPos.col})を攻撃`);
+                    return true;
+                }
+            }
+
+            // どの敵駒からも狙われていない
+            console.log(`[isCheck判定] ${player}は王手されていません`);
+            return false;
         }
 
-        // 詰み判定関数
+        // 「と金」など成り駒の利き判定テスト（デバッグ用）
+        function debugPromotedPieceMoves(player) {
+            const board = document.querySelector('.game-board');
+            const playerPieces = board.querySelectorAll(`.piece[data-player="${player}"]`);
+            
+            console.log(`\n[成り駒チェック] ${player}の駒を調査:`);
+            for (const piece of playerPieces) {
+                const char = piece.getAttribute('data-char');
+                if (['と', '杏', '圭', '全', '龍', '馬'].includes(char)) {
+                    const square = piece.closest('.square');
+                    const pos = getGridPosition(square, board);
+                    const moves = calculateValidMoves(piece, square, board, { checkSafety: false });
+                    console.log(`  ${char}(${pos.row},${pos.col}): ${moves.length}個の移動候補`);
+                }
+            }
+        }
+
+        // 遠距離駒の利き判定テスト（デバッグ用）
+        function debugLongRangePieceMoves(player) {
+            const board = document.querySelector('.game-board');
+            const playerPieces = board.querySelectorAll(`.piece[data-player="${player}"]`);
+            
+            console.log(`\n[遠距離駒チェック] ${player}の飛車・角をチェック:`);
+            for (const piece of playerPieces) {
+                const char = piece.getAttribute('data-char');
+                if (['飛', '龍', '角', '馬'].includes(char)) {
+                    const square = piece.closest('.square');
+                    const pos = getGridPosition(square, board);
+                    const moves = calculateValidMoves(piece, square, board, { checkSafety: false });
+                    console.log(`  ${char}(${pos.row},${pos.col}): ${moves.length}個の移動候補`);
+                    moves.forEach((move, idx) => {
+                        if (idx < 3) { // 最初の3個だけ表示
+                            const movePos = getGridPosition(move, board);
+                            console.log(`    → (${movePos.row},${movePos.col})`);
+                        }
+                    });
+                }
+            }
+        }
+        // 詰み判定関数 - 王手を回避する合法手があればfalse、詰みならtrue
         function isCheckmate(player) {
             const board = document.querySelector('.game-board');
             
             // まず王手されているか確認
             if (!isCheck(board, player)) {
+                console.log(`[詰み判定] ${player}は王手されていません`);
                 return false; // 王手されていなければ詰みではない
             }
 
+            console.log(`\n=== ${player} の詰み判定を開始 （王手状態） ===`);
+            
+            // デバッグ：成り駒と遠距離駒の利きチェック
+            debugPromotedPieceMoves(player);
+            debugLongRangePieceMoves(player);
+
             // 盤面上のすべての駒の移動をシミュレーション
             const playerPieces = board.querySelectorAll(`.piece[data-player="${player}"]`);
+            console.log(`[詰み判定] ${player}の駒数: ${playerPieces.length}`);
+
             for (const piece of playerPieces) {
                 const square = piece.closest('.square');
                 if (!square) continue;
 
+                const pieceChar = piece.getAttribute('data-char');
+                const fromPos = getGridPosition(square, board);
+
                 // この駒の移動候補（安全チェックなし）を取得
                 const possibleMoves = calculateValidMoves(piece, square, board, { checkSafety: false });
+                console.log(`[詰み判定] ${pieceChar}(${fromPos.row},${fromPos.col})の移動候補: ${possibleMoves.length}個`);
 
                 for (const targetSquare of possibleMoves) {
+                    const toPos = getGridPosition(targetSquare, board);
+                    
                     // 盤面をシミュレーション
                     const clone = board.cloneNode(true);
                     
-                    // クローン上で同じ駒を探す
-                    const fromPos = getGridPosition(square, board);
-                    const toPos = getGridPosition(targetSquare, board);
-                    if (!fromPos || !toPos) continue;
-
                     const cloneSquares = Array.from(clone.querySelectorAll('.square'));
                     const cloneFromSquare = cloneSquares[fromPos.index];
                     const cloneToSquare = cloneSquares[toPos.index];
@@ -957,22 +1055,23 @@
 
                     if (!clonePiece) continue;
 
-                    // 駒を移動
+                    // キャプチャ情報
                     const capturedPiece = cloneToSquare.querySelector('.piece');
+                    const capturedChar = capturedPiece ? capturedPiece.getAttribute('data-char') : 'なし';
                     if (capturedPiece) cloneToSquare.removeChild(capturedPiece);
                     
+                    // 駒を移動
                     cloneFromSquare.removeChild(clonePiece);
                     cloneToSquare.appendChild(clonePiece);
 
                     // プロモーション判定
-                    const pieceChar = piece.getAttribute('data-char');
                     const promotable = ['歩', '香', '桂', '銀', '飛', '角'].includes(pieceChar);
                     if (promotable) {
                         const inZone = (player === 'sente' && toPos.row <= 2) || (player === 'gote' && toPos.row >= 6);
                         const mustPromote = (['歩', '香'].includes(pieceChar) && 
                             ((player === 'sente' && toPos.row === 0) || (player === 'gote' && toPos.row === 8)));
                         
-                        if (mustPromote || (inZone && confirm === undefined)) {
+                        if (mustPromote) {
                             const promotionMap = {
                                 '歩': 'と',
                                 '香': '杏',
@@ -990,29 +1089,32 @@
 
                     // 王手が解除されたか確認
                     if (!isCheck(clone, player)) {
-                        return false; // 詰みではない
+                        console.log(`[詰み判定] 回避可能な手を発見: ${pieceChar}(${fromPos.row},${fromPos.col}) → (${toPos.row},${toPos.col}) [取り: ${capturedChar}]`);
+                        return false; // 詰みではない - 逃げられる
                     }
                 }
             }
 
             // 持ち駒の打ち込みをシミュレーション
             const capturedPieces = capturedCounts[player] || {};
+            console.log(`[詰み判定] 持ち駒: ${Object.keys(capturedPieces).length}種類`);
+
             for (const charLabel in capturedPieces) {
                 if (capturedPieces[charLabel] <= 0) continue;
 
                 // 盤面のすべての空きマスに打ってみる
-                const board = document.querySelector('.game-board');
                 const squares = Array.from(board.querySelectorAll('.square'));
                 
                 for (const targetSquare of squares) {
                     if (targetSquare.querySelector('.piece')) continue; // 駒が置いてある場合スキップ
 
+                    const toPos = getGridPosition(targetSquare, board);
+
                     // 二歩チェック
                     if (charLabel === '歩') {
-                        const targetPos = getGridPosition(targetSquare, board);
                         let hasPawnInCol = false;
                         for (let row = 0; row < 9; row++) {
-                            const checkSquare = getSquareAtPosition(row, targetPos.col, board);
+                            const checkSquare = getSquareAtPosition(row, toPos.col, board);
                             if (checkSquare && checkSquare !== targetSquare) {
                                 const existingPiece = checkSquare.querySelector('.piece');
                                 if (existingPiece && getPiecePlayer(existingPiece) === player && 
@@ -1027,9 +1129,6 @@
 
                     // 盤面をシミュレーション
                     const clone = board.cloneNode(true);
-                    const toPos = getGridPosition(targetSquare, board);
-                    if (!toPos) continue;
-
                     const cloneSquares = Array.from(clone.querySelectorAll('.square'));
                     const cloneTarget = cloneSquares[toPos.index];
                     
@@ -1041,14 +1140,15 @@
 
                     // 王手が解除されたか確認
                     if (!isCheck(clone, player)) {
-                        return false; // 詰みではない
+                        console.log(`[詰み判定] 回避可能な手を発見: 持ち駒${charLabel}を(${toPos.row},${toPos.col})に打つ`);
+                        return false; // 詰みではない - 逃げられる
                     }
                 }
             }
 
+            console.log(`[詰み判定] === 詰み確定！${player}に逃げ道なし ===\n`);
             return true; // すべての手を試しても王手が解除できなければ詰み
         }
-
         // ある手が安全か判定（盤上移動）
         function isMoveSafe(piece, fromSquare, toSquare) {
             const board = document.querySelector('.game-board');
@@ -1154,7 +1254,7 @@
         // 駒が成った状態かチェック
         function isPromoted(piece) {
             const char = piece.getAttribute('data-char');
-            return ['と', '成銀', '成桂', '成香', '龍', '馬'].includes(char);
+            return ['と', '杏', '圭', '全', '龍', '馬'].includes(char);
         }
 
         // 移動可能なマスを計算
@@ -1210,9 +1310,9 @@
                 }
                 addNearbyMoves(pos, directions, piecePlayer, moves);
 
-            } else if (pieceChar === '桂' || pieceChar === '圅') {
-                // 桂馬: 前に2マス横に1マス、圅は金と同じ
-                if (pieceChar === '圅') {
+            } else if (pieceChar === '桂' || pieceChar === '圭') {
+                // 桂馬: 前に2マス横に1マス、圭は成桂（金と同じ）
+                if (pieceChar === '圭') {
                     let directions;
                     if (piecePlayer === 'sente') {
                         directions = [[-1, 0], [-1, -1], [-1, 1], [0, -1], [0, 1], [1, 0]];
@@ -1227,9 +1327,9 @@
                     addNearbyMoves(pos, directions, piecePlayer, moves);
                 }
 
-            } else if (pieceChar === '香' || pieceChar === '杉') {
-                // 香車: 前方向に走り駒、杉は金と同じ
-                if (pieceChar === '杉') {
+            } else if (pieceChar === '香' || pieceChar === '杏') {
+                // 香車: 前方向に走り駒、杏は成香（金と同じ）
+                if (pieceChar === '杏') {
                     let directions;
                     if (piecePlayer === 'sente') {
                         directions = [[-1, 0], [-1, -1], [-1, 1], [0, -1], [0, 1], [1, 0]];
