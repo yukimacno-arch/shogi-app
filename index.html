@@ -77,8 +77,9 @@
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
+            gap: 24px;
             min-height: 100vh;
             background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
             padding: 20px;
@@ -89,6 +90,18 @@
             flex-direction: column;
             align-items: center;
             gap: 30px;
+        }
+
+        /* ヘッダーの操作パネル */
+        #ui-header {
+            width: 100%;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            justify-content: center;
+            align-items: center;
+            padding: 12px 18px;
+            box-sizing: border-box;
         }
 
         h1 {
@@ -129,6 +142,7 @@
         .board-container {
             perspective: 1000px;
             box-shadow: 0 30px 60px rgba(0, 0, 0, 0.9);
+            margin: 0 auto;
         }
 
         .game-board {
@@ -498,17 +512,19 @@
 </head>
 <body>
     <!-- ログインUI -->
-    <div id="auth-ui" style="margin-bottom:10px; text-align:center; color:#d4a574;">
-        <button id="google-login-btn" style="padding:5px 10px;">Googleでログイン</button>
-        <span id="profile-container" style="margin-left:20px;"></span>
-        <button id="undo-btn" style="padding:5px 10px; margin-left:20px;">待った (Undo)</button>
-    </div>
-    <!-- ネットワーク対戦UI -->
-    <div id="network-ui" style="margin-bottom:20px; text-align:center; color:#d4a574;">
-        <div>あなたのID: <span id="my-id">...</span></div>
-        <input type="text" id="peer-id-input" placeholder="相手のIDを入力" style="padding:5px; margin:5px;">
-        <button id="connect-button" style="padding:5px 10px;">接続する</button>
-        <div id="connection-status" style="margin-top:5px; font-weight:bold;">接続待ち...</div>
+    <div id="ui-header">
+        <div id="auth-ui" style="margin-bottom:10px; text-align:center; color:#d4a574;">
+            <button id="google-login-btn" style="padding:5px 10px;">Googleでログイン</button>
+            <span id="profile-container" style="margin-left:20px;"></span>
+            <button id="undo-btn" style="padding:5px 10px; margin-left:20px;">待った (Undo)</button>
+        </div>
+        <!-- ネットワーク対戦UI -->
+        <div id="network-ui" style="margin-bottom:20px; text-align:center; color:#d4a574;">
+            <div>あなたのID: <span id="my-id">...</span></div>
+            <input type="text" id="peer-id-input" placeholder="相手のIDを入力" style="padding:5px; margin:5px;">
+            <button id="connect-button" style="padding:5px 10px;">接続する</button>
+            <div id="connection-status" style="margin-top:5px; font-weight:bold;">接続待ち...</div>
+        </div>
     </div>
     <div class="container">
         <h1>将棋</h1>
@@ -753,11 +769,22 @@
 
         function sendGameState() {
             if (conn && conn.open) {
-                conn.send({
+                const payload = {
                     board: serializeBoard(),
                     capturedCounts: capturedCounts,
-                    isWhiteTurn: isWhiteTurn
-                });
+                    isWhiteTurn: isWhiteTurn,
+                    gameOver: gameOver
+                };
+                if (gameOver) {
+                    payload.gameWinner = gameWinner;
+                    payload.gameLoser = gameLoser;
+                    // include overlay text so opponent can show same message
+                    payload.gameOverMessage = {
+                        title: (gameWinner ? ('詰み！' + gameWinner + 'の勝利！') : ''),
+                        text: (gameLoser ? (gameLoser + 'の王が詰みました。') : '')
+                    };
+                }
+                conn.send(payload);
             }
         }
 
@@ -847,6 +874,25 @@
             clearHighlights();
             selectedPiece = null;
             selectedCapturedPiece = null;
+
+            // 相手からゲーム終了状態が送られた場合
+            if (data.gameOver && !gameOver) {
+                gameOver = true;
+                gameWinner = data.gameWinner || null;
+                gameLoser = data.gameLoser || null;
+                const overlay = document.getElementById('game-over-overlay');
+                const title = document.getElementById('game-over-title');
+                const text = document.getElementById('game-over-text');
+                if (data.gameOverMessage) {
+                    title.textContent = data.gameOverMessage.title;
+                    text.textContent = data.gameOverMessage.text;
+                } else if (gameWinner && gameLoser) {
+                    title.textContent = gameWinner + 'の勝利！';
+                    text.textContent = gameLoser + 'の王が詰みました。';
+                }
+                overlay.classList.add('show');
+                alert('相手側で詰みが発生しました。あなたの負けです。');
+            }
         }
 
         // グリッド位置を計算
@@ -1277,16 +1323,16 @@
                     } else {
                         directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
                     }
-                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                    addNearbyMoves(pos, directions, piecePlayer, moves, board);
                 } else {
                     const directions = piecePlayer === 'sente' ? [[-1, 0]] : [[1, 0]];
-                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                    addNearbyMoves(pos, directions, piecePlayer, moves, board);
                 }
 
             } else if (pieceChar === '玉' || pieceChar === '王') {
                 // 玉は8方向1マス
                 const directions = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
-                addNearbyMoves(pos, directions, piecePlayer, moves);
+                addNearbyMoves(pos, directions, piecePlayer, moves, board);
 
             } else if (pieceChar === '金' || pieceChar === '全') {
                 // 金/全: 前、斜め前、左右、後ろ
@@ -1296,7 +1342,7 @@
                 } else {
                     directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
                 }
-                addNearbyMoves(pos, directions, piecePlayer, moves);
+                addNearbyMoves(pos, directions, piecePlayer, moves, board);
 
             } else if (pieceChar === '銀') {
                 // 銀: 前、斜め前、斜め後ろ
@@ -1308,7 +1354,7 @@
                     // 後手: 下、左下、右下、左上、右上
                     directions = [[1, 0], [1, -1], [1, 1], [-1, -1], [-1, 1]];
                 }
-                addNearbyMoves(pos, directions, piecePlayer, moves);
+                addNearbyMoves(pos, directions, piecePlayer, moves, board);
 
             } else if (pieceChar === '桂' || pieceChar === '圭') {
                 // 桂馬: 前に2マス横に1マス、圭は成桂（金と同じ）
@@ -1319,12 +1365,12 @@
                     } else {
                         directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
                     }
-                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                    addNearbyMoves(pos, directions, piecePlayer, moves, board);
                 } else {
                     const directions = piecePlayer === 'sente'
                         ? [[-2, -1], [-2, 1]]
                         : [[2, -1], [2, 1]];
-                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                    addNearbyMoves(pos, directions, piecePlayer, moves, board);
                 }
 
             } else if (pieceChar === '香' || pieceChar === '杏') {
@@ -1336,16 +1382,16 @@
                     } else {
                         directions = [[1, 0], [1, -1], [1, 1], [0, -1], [0, 1], [-1, 0]];
                     }
-                    addNearbyMoves(pos, directions, piecePlayer, moves);
+                    addNearbyMoves(pos, directions, piecePlayer, moves, board);
                 } else {
                     const direction = piecePlayer === 'sente' ? [-1, 0] : [1, 0];
-                    addSlidingMoves(pos, [direction], piecePlayer, moves);
+                    addSlidingMoves(pos, [direction], piecePlayer, moves, board);
                 }
 
             } else if (pieceChar === '飛' || pieceChar === '龍') {
                 // 飛車: 上下左右に走り駒、龍は飛車の動き+周囲1マス
                 const slidingDirections = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-                addSlidingMoves(pos, slidingDirections, piecePlayer, moves);
+                addSlidingMoves(pos, slidingDirections, piecePlayer, moves, board);
                 if (pieceChar === '龍') {
                     // 周囲1マスの8方向も追加
                     const nearbyDirections = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
@@ -1355,7 +1401,7 @@
             } else if (pieceChar === '角' || pieceChar === '馬') {
                 // 角行: 斜め4方向に走り駒、馬は角の動き+周囲1マス
                 const slidingDirections = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
-                addSlidingMoves(pos, slidingDirections, piecePlayer, moves);
+                addSlidingMoves(pos, slidingDirections, piecePlayer, moves, board);
                 if (pieceChar === '馬') {
                     // 周囲1マスの上下左右も追加
                     const nearbyDirections = [[-1, 0], [1, 0], [0, -1], [0, 1]];
@@ -1569,15 +1615,15 @@
             updateTurnInfo();
             sendGameState();
 
-            // 詰み判定
-            setTimeout(() => {
+            // 詰み判定（手番切り替わり直後）
+            {
                 const opponent = isWhiteTurn ? 'gote' : 'sente';
                 if (isCheckmate(opponent)) {
                     const opponentLabel = isWhiteTurn ? '後手' : '先手';
                     const winner = isWhiteTurn ? '先手' : '後手';
                     endGameCheckmate(winner, opponentLabel);
                 }
-            }, 100);
+            }
         }
         
         // 成ることができるかチェック（移動後）
@@ -1683,20 +1729,23 @@
             updateTurnInfo();
             sendGameState();
 
-            // 詰み判定
-            setTimeout(() => {
-                const opponent = isWhiteTurn ? 'gote' : 'sente';
-                if (isCheckmate(opponent)) {
-                    const opponentLabel = isWhiteTurn ? '後手' : '先手';
-                    const winner = isWhiteTurn ? '先手' : '後手';
-                    endGameCheckmate(winner, opponentLabel);
-                }
-            }, 100);
+            // 詰み判定（手番が切り替わった直後）
+            const opponent = isWhiteTurn ? 'gote' : 'sente';
+            if (isCheckmate(opponent)) {
+                const opponentLabel = isWhiteTurn ? '後手' : '先手';
+                const winner = isWhiteTurn ? '先手' : '後手';
+                endGameCheckmate(winner, opponentLabel);
+            }
         }
 
         // ゲーム終了処理（詰み）
+        let gameWinner = null;
+        let gameLoser = null;
+        
         function endGameCheckmate(winner, loser) {
             gameOver = true;
+            gameWinner = winner;
+            gameLoser = loser;
             const overlay = document.getElementById('game-over-overlay');
             const title = document.getElementById('game-over-title');
             const text = document.getElementById('game-over-text');
@@ -1704,6 +1753,9 @@
             title.textContent = '詰み！' + winner + 'の勝利！';
             text.textContent = loser + 'の王が詰みました。';
             overlay.classList.add('show');
+            alert('詰みです！勝負あり！');
+            // 相手にも状態を通知
+            sendGameState();
         }
 
         // ゲーム終了処理
